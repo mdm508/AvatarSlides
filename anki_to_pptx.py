@@ -26,7 +26,7 @@ LEFT_RIGHT_SLIDE_WIDTH_IN = 13.333
 LEFT_RIGHT_SLIDE_HEIGHT_IN = 5
 
 # Top/down deck slide size
-TOP_DOWN_SLIDE_WIDTH_IN = 8.3
+TOP_DOWN_SLIDE_WIDTH_IN = 8.0
 TOP_DOWN_SLIDE_HEIGHT_IN = 7.5
 
 # Shared spacing
@@ -368,4 +368,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_run()
+    # main()
