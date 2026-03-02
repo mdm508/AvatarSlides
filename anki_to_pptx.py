@@ -40,8 +40,8 @@ LEFT_RIGHT_EN_FONT_PT = 24
 LEFT_RIGHT_ZH_FONT_PT = LEFT_RIGHT_EN_FONT_PT + 4
 
 # Top/down layout fonts
-TOP_DOWN_EN_FONT_PT = 20
-TOP_DOWN_ZH_FONT_PT = TOP_DOWN_EN_FONT_PT + 3
+TOP_DOWN_EN_FONT_PT = 16
+TOP_DOWN_ZH_FONT_PT = 26
 
 # Top/down image size
 TOP_DOWN_IMAGE_WIDTH_IN = 8
@@ -49,8 +49,8 @@ TOP_DOWN_IMAGE_HEIGHT_IN = 6
 TOP_DOWN_TEXT_GAP_IN = 0.00
 
 # Image trimming
-CROP_LEFT_PX = 12
-CROP_RIGHT_PX = 12
+CROP_LEFT_PX = 14
+CROP_RIGHT_PX = 14
 CROP_TOP_PX = 0
 CROP_BOTTOM_PX = 0
 
@@ -262,9 +262,11 @@ def add_slide_top_image_text_below(prs: Presentation, en_text: str, zh_text: str
         box.fill.background()
         box.line.fill.background()
 
-    text_left = img_left
+    inset_left = int(img_w * 0.02)
+    inset_right = int(img_w * 0.02)
+    text_left = img_left + inset_left
     text_top = int(img_top + img_h + text_gap)
-    text_width = int(img_w)
+    text_width = int(img_w - inset_left - inset_right)
     text_height = int(slide_height - text_top - bottom_margin)
 
     text_box = slide.shapes.add_textbox(text_left, text_top, text_width, text_height)
