@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+env/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Generated outputs
+*.pptx
+*.pdf
+*.csv
+
+# Temp files
+*.tmp
+*.temp
+
+# Local input/media if you don’t want them tracked
+02.txt
+collection.media/

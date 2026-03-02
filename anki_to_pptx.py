@@ -62,28 +62,40 @@ CROP_TOP_PX = 0
 CROP_BOTTOM_PX = 0
 
 # 4-up page layout
-PRINT4_PAGE_MARGIN_IN = 0.20
+PRINT4_PAGE_MARGIN_TOP_IN = 0.30
+PRINT4_PAGE_MARGIN_BOTTOM_IN = 0.35
+PRINT4_PAGE_MARGIN_LEFT_IN = 0.22
+PRINT4_PAGE_MARGIN_RIGHT_IN = 0.22
 PRINT4_CARD_GAP_X_IN = 0.15
-PRINT4_CARD_GAP_Y_IN = 0.20
-PRINT4_CARD_MARGIN_IN = 0.08
-PRINT4_TEXT_GAP_IN = 0.04
+PRINT4_CARD_GAP_Y_IN = 0.22
+PRINT4_CARD_MARGIN_IN = 0.09
+PRINT4_TEXT_GAP_IN = 0.05
 
 # 4-up text formatting
 PRINT4_EN_FONT_PT = 20
 PRINT4_ZH_FONT_PT = 23
 PRINT4_TEXT_LEFT_INSET_FRACTION = 0.02
 PRINT4_TEXT_RIGHT_INSET_FRACTION = 0.02
-PRINT4_EN_AFTER_PT = 3
+PRINT4_EN_AFTER_PT = 4
 
 # 4-up image sizing within each card
-PRINT4_IMAGE_HEIGHT_FRACTION = 0.68
+PRINT4_IMAGE_HEIGHT_FRACTION = 0.60
+
+# 4-up fit strictness
+PRINT4_BOTTOM_RESERVE_FRACTION = 0.10
+PRINT4_FIT_WIDTH_SAFETY_FRACTION = 0.92
+PRINT4_FIT_HEIGHT_SAFETY_FRACTION = 0.84
+PRINT4_MEASURE_LINE_GAP_FRACTION = 0.36
 
 # PDF conversion
 AUTO_CONVERT_TO_PDF = True
 
 # Auto-fit safeguards
-MIN_FONT_PT = 10
+MIN_FONT_PT = 8
 FONT_SHRINK_STEP_PT = 1
+
+# Overlap cleanup
+MAX_OVERLAP_SEGMENTS_TO_CHECK = 3
 
 
 def clean_text(text: str) -> str:
@@ -153,6 +165,62 @@ def export_sanitized_csv(rows: List[Dict[str, str]], output_path: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=["En", "Zh", "ImgBaseName", "AudioBaseName"])
         writer.writeheader()
         writer.writerows(rows)
+
+
+def split_into_segments(text: str) -> List[str]:
+    text = re.sub(r"\s+", " ", (text or "")).strip()
+    if not text:
+        return []
+
+    # Split on sentence-ending punctuation, preserving punctuation.
+    parts = re.split(r"(?<=[.!?。！？])\s+", text)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    # Fallback: if no sentence punctuation found, split on spaced em dashes / semicolons.
+    if len(parts) == 1:
+        parts = re.split(r"\s+(?=--|—)|(?<=;)\s+|(?<=；)\s+", text)
+        parts = [p.strip() for p in parts if p.strip()]
+
+    return parts
+
+
+def normalize_segment(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[“”\"'‘’]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def remove_trailing_overlap(curr_text: str, next_text: str) -> str:
+    curr_segments = split_into_segments(curr_text)
+    next_segments = split_into_segments(next_text)
+
+    if not curr_segments or not next_segments:
+        return curr_text
+
+    max_k = min(len(curr_segments), len(next_segments), MAX_OVERLAP_SEGMENTS_TO_CHECK)
+
+    for k in range(max_k, 0, -1):
+        curr_suffix = [normalize_segment(x) for x in curr_segments[-k:]]
+        next_prefix = [normalize_segment(x) for x in next_segments[:k]]
+        if curr_suffix == next_prefix:
+            trimmed = curr_segments[:-k]
+            return " ".join(trimmed).strip()
+
+    return curr_text
+
+
+def dedupe_neighbor_overlaps(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    if not rows:
+        return rows
+
+    cleaned = [dict(r) for r in rows]
+
+    for i in range(len(cleaned) - 1):
+        cleaned[i]["En"] = remove_trailing_overlap(cleaned[i]["En"], cleaned[i + 1]["En"])
+        cleaned[i]["Zh"] = remove_trailing_overlap(cleaned[i]["Zh"], cleaned[i + 1]["Zh"])
+
+    return cleaned
 
 
 def make_trimmed_image(image_path: Path) -> Path:
@@ -236,7 +304,7 @@ def measure_wrapped_text_height(text: str, font_size_pt: int, max_width_px: int)
 
     bbox = draw.textbbox((0, 0), "Ag", font=font)
     line_height = bbox[3] - bbox[1]
-    line_gap = max(1, int(line_height * 0.20))
+    line_gap = max(1, int(line_height * PRINT4_MEASURE_LINE_GAP_FRACTION))
 
     total_height = len(lines) * line_height
     if len(lines) > 1:
@@ -257,8 +325,11 @@ def fit_font_sizes_for_two_paragraphs(
     emu_per_inch = 914400
     dpi = 96
 
-    box_width_px = max(1, int(box_width_emu / emu_per_inch * dpi))
-    box_height_px = max(1, int(box_height_emu / emu_per_inch * dpi))
+    safe_width_emu = int(box_width_emu * PRINT4_FIT_WIDTH_SAFETY_FRACTION)
+    safe_height_emu = int(box_height_emu * PRINT4_FIT_HEIGHT_SAFETY_FRACTION)
+
+    box_width_px = max(1, int(safe_width_emu / emu_per_inch * dpi))
+    box_height_px = max(1, int(safe_height_emu / emu_per_inch * dpi))
     paragraph_gap_px = points_to_pixels(paragraph_gap_pt, dpi=dpi)
 
     en_pt = start_en_pt
@@ -455,7 +526,9 @@ def add_print4_card(
     text_left = usable_left + inset_left
     text_top = usable_top + img_h + int(text_gap)
     text_width = img_w - inset_left - inset_right
-    text_height = usable_height - img_h - int(text_gap)
+
+    nominal_text_height = usable_height - img_h - int(text_gap)
+    text_height = int(nominal_text_height * (1.0 - PRINT4_BOTTOM_RESERVE_FRACTION))
 
     fitted_en_pt, fitted_zh_pt = fit_font_sizes_for_two_paragraphs(
         en_text=en_text,
@@ -522,21 +595,24 @@ def build_presentation_print4(rows: List[Dict[str, str]], media_dir: Path, outpu
     prs.slide_width = Inches(PRINT4_PAGE_WIDTH_IN)
     prs.slide_height = Inches(PRINT4_PAGE_HEIGHT_IN)
 
-    page_margin = Inches(PRINT4_PAGE_MARGIN_IN)
+    margin_left = Inches(PRINT4_PAGE_MARGIN_LEFT_IN)
+    margin_right = Inches(PRINT4_PAGE_MARGIN_RIGHT_IN)
+    margin_top = Inches(PRINT4_PAGE_MARGIN_TOP_IN)
+    margin_bottom = Inches(PRINT4_PAGE_MARGIN_BOTTOM_IN)
     gap_x = Inches(PRINT4_CARD_GAP_X_IN)
     gap_y = Inches(PRINT4_CARD_GAP_Y_IN)
 
-    usable_width = prs.slide_width - int(2 * page_margin)
-    usable_height = prs.slide_height - int(2 * page_margin)
+    usable_width = prs.slide_width - int(margin_left + margin_right)
+    usable_height = prs.slide_height - int(margin_top + margin_bottom)
 
     card_width = int((usable_width - gap_x) / 2)
     card_height = int((usable_height - gap_y) / 2)
 
     positions = [
-        (int(page_margin), int(page_margin)),
-        (int(page_margin + card_width + gap_x), int(page_margin)),
-        (int(page_margin), int(page_margin + card_height + gap_y)),
-        (int(page_margin + card_width + gap_x), int(page_margin + card_height + gap_y)),
+        (int(margin_left), int(margin_top)),
+        (int(margin_left + card_width + gap_x), int(margin_top)),
+        (int(margin_left), int(margin_top + card_height + gap_y)),
+        (int(margin_left + card_width + gap_x), int(margin_top + card_height + gap_y)),
     ]
 
     for i in range(0, len(rows), 4):
@@ -603,11 +679,17 @@ def maybe_convert_to_pdf(paths: List[Path]) -> None:
             print(f"PDF conversion skipped/failed: {path}")
 
 
+def prepare_rows(input_file: Path) -> List[Dict[str, str]]:
+    rows = parse_anki_export(input_file)
+    rows = dedupe_neighbor_overlaps(rows)
+    return rows
+
+
 def test_run() -> None:
     input_file = Path("02.txt")
     media_dir = DEFAULT_MEDIA_DIR
 
-    rows = parse_anki_export(input_file)
+    rows = prepare_rows(input_file)
     export_sanitized_csv(rows, input_file.with_name("02_sanitized.csv"))
 
     print4_output = input_file.with_name(input_file.stem + "_print4_page.pptx")
@@ -655,7 +737,7 @@ def main() -> None:
         else input_path.with_name(input_path.stem + "_print4_page.pptx")
     )
 
-    rows = parse_anki_export(input_path)
+    rows = prepare_rows(input_path)
 
     if args.export_csv:
         export_sanitized_csv(rows, input_path.with_name(input_path.stem + "_sanitized.csv"))
